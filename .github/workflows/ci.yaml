@@ -5,17 +5,90 @@ on:
     branches: [ "main" ]
     paths:
       - "api/**"
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
-
 jobs:
-  build:
+  build-test-analyze:
+    name: Build, Test, Analyze and Push
     runs-on: ubuntu-latest
 
     steps:
+      # 1 Checkout code
       - name: Checkout SCM
         uses: actions/checkout@v4
 
+      # 2 Set up Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: api/package.json
+
+      # 3 Install dependencies
+      - name: Install dependencies
+        working-directory: api
+        run: npm install
+
+      # 4 Run unit tests
+      - name: Run unit tests
+        working-directory: api
+        run: npm test --if-present
+
+      # 5 Check SonarQube reachability
+      - name: Test SonarQube reachability
+        run: curl -v ${{ secrets.SONAR_HOST_URL }}/api/system/status
+
+      # 6 Install SonarScanner CLI (compatible with SonarQube 25.x)
+      - name: Install SonarScanner CLI
+        run: |
+          wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip -O scanner.zip
+          unzip -q scanner.zip -d scanner
+          echo "SONAR_SCANNER_HOME=$PWD/scanner/sonar-scanner-5.0.1.3006-linux" >> $GITHUB_ENV
+          echo "$PWD/scanner/sonar-scanner-5.0.1.3006-linux/bin" >> $GITHUB_PATH
+
+      # 7 Run SonarQube scan
+      - name: SonarQube Scan
+        working-directory: api
+        run: |
+          sonar-scanner \
+            -Dsonar.projectKey=api \
+            -Dsonar.projectName=api \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.scanner.connectTimeout=60000 \
+            -Dsonar.scanner.readTimeout=60000
+
+      # 8 Scan dependencies for vulnerabilities
+      - name: Dependency vulnerability scan
+        working-directory: api
+        run: |
+          npm audit --audit-level=moderate || true
+
+      # 9 Build Docker image
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: api/Dockerfile
+          push: false
+          tags: api-app:latest
+
+      # 10 Trivy container scan
+      - name: Container image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: api-app:latest
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # 11 Login to ACR
       - name: Login to ACR
         uses: docker/login-action@v3
         with:
@@ -23,7 +96,8 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and push
+      # 12 Push image to ACR
+      - name: Push image to ACR
         uses: docker/build-push-action@v6
         with:
           context: api
@@ -31,6 +105,9 @@ jobs:
           push: true
           tags: |
             ${{ secrets.ACR_LOGIN_SERVER }}/api-app:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/api-app:${{ github.sha }}
 
-
-
+      # 13 Upload coverage/report to summary
+      - name: Upload summary
+        if: success()
+        run: echo "CI completed successfully!" >> $GITHUB_STEP_SUMMARY
