@@ -62,8 +62,10 @@ jobs:
             -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.scanner.connectTimeout=60000 \
-            -Dsonar.scanner.readTimeout=60000
+            -Dsonar.scanner.connectTimeout=120000 \
+            -Dsonar.scanner.readTimeout=120000 \
+            -Dsonar.ws.timeout=600
+           
 
       # 8 Scan dependencies for vulnerabilities
       - name: Dependency vulnerability scan
