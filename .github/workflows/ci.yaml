@@ -41,6 +41,9 @@ jobs:
       - name: Test SonarQube reachability
         run: curl -v ${{ secrets.SONAR_HOST_URL }}/api/system/status
 
+      - name: Test batch download
+        run: curl -v http://4.242.72.128:9000/batch/index
+
       # 6 Install SonarScanner CLI (compatible with SonarQube 25.x)
       - name: Install SonarScanner CLI
         run: |
